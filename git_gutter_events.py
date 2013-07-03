@@ -5,9 +5,25 @@ try:
 except ImportError:
     from view_collection import ViewCollection
 
+ST2 = int(sublime.version()) < 3014
+import time
+
 class GitGutterEvents(sublime_plugin.EventListener):
     def __init__(self):
         self.load_settings()
+        self.last_time = 0
+        self.in_timeout = False
+
+    def _view_collection_add_debounced(self, view):
+        now = time.time()
+        if now - self.last_time >= 1:
+            self.in_timeout = False
+            self.last_time = now
+            ViewCollection.add(view)
+        elif not self.in_timeout:
+            self.in_timeout = True
+            sublime.set_timeout(
+                lambda:self._view_collection_add_debounced(view), 3000)
 
     # Synchronous
 
@@ -16,21 +32,33 @@ class GitGutterEvents(sublime_plugin.EventListener):
             return None
         if not self.non_blocking:
             ViewCollection.add(view)
+        elif ST2:
+            self._view_collection_add_debounced(view)
 
     def on_clone(self, view):
         if not self.non_blocking:
             ViewCollection.add(view)
+        elif ST2:
+            now = time.time()
+            if now - self.last_time >= 1:
+                self.last_time = now
+                sublime.set_timeout(lambda: ViewCollection.add(view), 5)
 
     def on_post_save(self, view):
         if not self.non_blocking:
             ViewCollection.add(view)
+        elif ST2:
+            now = time.time()
+            if now - self.last_time >= 5:
+                self.last_time = now
+                sublime.set_timeout(lambda: ViewCollection.add(view), 5)
 
     def on_load(self, view):
-        if not self.non_blocking and not self.live_mode:
+        if (not self.non_blocking or ST2) and not self.live_mode:
             ViewCollection.add(view)
 
     def on_activated(self, view):
-        if not self.non_blocking and self.focus_change_mode:
+        if (not self.non_blocking or ST2) and self.focus_change_mode:
             ViewCollection.add(view)
 
     
@@ -72,5 +100,5 @@ class GitGutterEvents(sublime_plugin.EventListener):
             self.focus_change_mode = True
 
         self.non_blocking = self.settings.get('non_blocking')
-        if self.non_blocking is None or int(sublime.version()) < 3014: 
+        if self.non_blocking is None:  # or int(sublime.version()) < 3014: 
             self.non_blocking = False
